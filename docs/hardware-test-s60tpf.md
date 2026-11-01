@@ -3,8 +3,10 @@
 Nothing in this integration has run on a real plug. Work through this in order: each
 step tests one assumption, so the first failure points at the cause.
 
-Before you start, note each plug's **firmware** from the eWeLink app, and turn on
-**Capture payloads** in the integration's options straight after adding it.
+Before you start, install the integration using the
+[README](../README.md#install), note each plug's **firmware** from the eWeLink app,
+and turn on **Capture payloads** in the integration's options straight after adding
+it.
 
 Use a plug you can afford to lose control of for a while, with a simple load such as
 a lamp. Avoid anything that must stay on while testing.

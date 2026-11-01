@@ -7,8 +7,9 @@ does not depend on any other integration.
 > [!WARNING]
 > **Not yet tested on real hardware.** Everything here was built from Sonoff's
 > documents, from reading [SonoffLAN](https://github.com/AlexxIT/SonoffLAN), and
-> against a fake device written for the tests. Passing tests show the code matches
-> that model, not that the model matches a physical plug. Follow the
+> against a fake device written for the tests. It has run on a real Home Assistant
+> server with real mDNS, but only with that fake plug, which shows the code matches
+> the model and not that the model matches a physical plug. Follow the
 > [S60TPF test checklist](docs/hardware-test-s60tpf.md) before relying on it.
 
 **Primary target:** SONOFF **S60TPF** (UIID 190), in its normal encrypted LAN mode.
@@ -24,12 +25,39 @@ does not depend on any other integration.
 
 ## Install
 
-Requires Home Assistant 2026.10 or newer. That is the only version line CI tests
-against.
+Requires Home Assistant 2026.10 or newer. CI tests 2026.10, and the test suite was also
+run by hand on the 2026.11 beta.
+
+This is an **integration**. It is not an app, which is what Home Assistant calls
+add-ons since 2026.2, so it does not go in the Apps section.
+
+### Home Assistant 2026.11 and newer: Marketplace
+
+HACS is built into Home Assistant from 2026.11 as the Marketplace, so there is nothing
+extra to install. HACS itself can no longer be installed on these versions.
+
+1. Go to **Settings → Marketplace**, and accept the community content warning the
+   first time.
+2. Select **Add from link** and enter `jcarcaboso/sonoff-local`. If asked for the type,
+   choose **Integration**. Adding your own repository needs a GitHub connection, which
+   Home Assistant asks for. It requests no private repository or write access.
+3. Open the repository's page and install it. The setup page opens. If a repair asks
+   you to restart Home Assistant, do so.
+
+This repository has no releases yet, so the Marketplace follows the `main` branch and
+every new commit appears as an update.
+
+### Home Assistant 2026.10: HACS
 
 1. In HACS, open the menu and choose **Custom repositories**.
 2. Add `https://github.com/jcarcaboso/sonoff-local` with the type **Integration**.
 3. Install **Sonoff Local** and restart Home Assistant.
+
+### By hand
+
+Copy `custom_components/sonoff_local` into the `custom_components` folder of your Home
+Assistant configuration directory and restart. Then add it under **Settings → Devices &
+services**. A copy made this way gets no update notifications.
 
 ## Setup
 
