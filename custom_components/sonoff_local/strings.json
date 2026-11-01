@@ -1,0 +1,100 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This device is already configured.",
+      "not_supported": "This is not a supported Sonoff device.",
+      "reauth_successful": "The device has been updated.",
+      "reconfigure_successful": "The device has been updated."
+    },
+    "error": {
+      "cannot_connect": "Could not reach the device. Check the address and that port 8081 is reachable from Home Assistant.",
+      "invalid_device_id": "A device ID is 10 letters or digits, for example 1000abcdef.",
+      "invalid_key": "This devicekey does not decrypt the device's data.",
+      "key_required": "This device encrypts its traffic, so a devicekey is required.",
+      "wrong_device_id": "A device answered, but it reports a different device ID."
+    },
+    "flow_title": "Sonoff {name}",
+    "step": {
+      "confirm": {
+        "description": "Add Sonoff device {device_id}? It does not encrypt its traffic, so no devicekey is needed. Anyone on your network can control it."
+      },
+      "device_key": {
+        "data": {
+          "device_key": "Devicekey"
+        },
+        "data_description": {
+          "device_key": "A secret per device, stored in Home Assistant. See the integration's README for how to get it."
+        },
+        "description": "Device {device_id} encrypts its traffic. Enter its devicekey.",
+        "title": "Devicekey required"
+      },
+      "reauth_confirm": {
+        "data": {
+          "device_key": "Devicekey"
+        },
+        "description": "The stored devicekey for {device_id} no longer works. This usually means the device was paired again. Enter the new key, or leave it empty if the device is now in DIY mode.",
+        "title": "Update devicekey"
+      },
+      "reconfigure": {
+        "data": {
+          "device_key": "Devicekey",
+          "host": "Host",
+          "port": "Port"
+        },
+        "data_description": {
+          "device_key": "Leave empty only if the device does not encrypt its traffic."
+        },
+        "description": "Change the connection details for {device_id}."
+      },
+      "user": {
+        "data": {
+          "device_id": "Device ID",
+          "device_key": "Devicekey",
+          "host": "Host",
+          "port": "Port"
+        },
+        "data_description": {
+          "device_id": "The 10 characters shown in the eWeLink app's device settings.",
+          "device_key": "Required for devices not in DIY mode, including the S60TPF.",
+          "host": "IP address of the device. Reserve it in your DHCP server."
+        },
+        "description": "Add a Sonoff device by its address."
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "energy_day": {
+        "name": "Energy today"
+      },
+      "energy_month": {
+        "name": "Energy this month"
+      },
+      "energy_week": {
+        "name": "Energy this week"
+      },
+      "energy_year": {
+        "name": "Energy this year"
+      }
+    }
+  },
+  "exceptions": {
+    "command_failed": {
+      "message": "The device did not accept the command: {error}"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "data": {
+          "capture_payloads": "Capture payloads",
+          "poll_interval": "Poll interval"
+        },
+        "data_description": {
+          "capture_payloads": "Keep the last 200 redacted TXT and HTTP frames in the diagnostics download. Use this to report parsing problems. Keys, Wi-Fi details and addresses are removed.",
+          "poll_interval": "How often to ask for fresh readings. A poll can be a write to the device, so avoid very short intervals."
+        }
+      }
+    }
+  }
+}
