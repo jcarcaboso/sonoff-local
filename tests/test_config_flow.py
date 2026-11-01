@@ -100,6 +100,19 @@ async def test_discovery_of_encrypted_device_asks_for_key(
     assert result["result"].unique_id == DEVICE_ID
 
 
+async def test_setup_after_flow_respects_spacing(
+    hass: HomeAssistant, device: FakeS60TPF
+) -> None:
+    """The probe and the first poll come from different clients."""
+    result = await start_zeroconf(hass, device)
+    await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_DEVICE_KEY: DEVICE_KEY}
+    )
+    await hass.async_block_till_done()
+    first, second = device.requests[:2]
+    assert second.monotonic - first.monotonic >= 0.19
+
+
 async def test_discovery_rejects_wrong_key_from_txt(
     hass: HomeAssistant, device: FakeS60TPF
 ) -> None:

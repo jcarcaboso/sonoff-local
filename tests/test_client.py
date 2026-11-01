@@ -343,6 +343,49 @@ async def test_requests_are_spaced(
     assert min(gaps) >= MIN_REQUEST_INTERVAL - 0.01
 
 
+async def test_spacing_survives_a_new_client(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """The limit belongs to the device, not to one client object.
+
+    Found by running a real server: the config flow's probe and the entry's first poll
+    use separate clients, and reached the plug 19 ms apart.
+    """
+    await encrypted_client(session, device, min_interval=MIN_REQUEST_INTERVAL).request(
+        "getState"
+    )
+    await encrypted_client(session, device, min_interval=MIN_REQUEST_INTERVAL).request(
+        "getState"
+    )
+    first, second = device.requests
+    assert second.monotonic - first.monotonic >= MIN_REQUEST_INTERVAL - 0.01
+
+
+async def test_concurrent_clients_are_spaced(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """A reconfigure probe can run alongside the coordinator's poll."""
+    clients = [
+        encrypted_client(session, device, min_interval=MIN_REQUEST_INTERVAL)
+        for _ in range(3)
+    ]
+    await asyncio.gather(*(client.request("getState") for client in clients))
+    times = sorted(request.monotonic for request in device.requests)
+    assert min(b - a for a, b in itertools.pairwise(times)) >= (
+        MIN_REQUEST_INTERVAL - 0.01
+    )
+
+
+def test_spacing_table_stays_bounded() -> None:
+    """Addresses that come and go must not accumulate for ever."""
+    protocol._next_request_at.clear()
+    for number in range(protocol._MAX_TRACKED_DEVICES + 50):
+        protocol._reserve_request_slot(
+            (f"192.0.2.{number}", 8081), 0.2, 1000.0 + number
+        )
+    assert len(protocol._next_request_at) <= protocol._MAX_TRACKED_DEVICES
+
+
 async def test_retries_are_spaced(
     session: aiohttp.ClientSession, device: FakeS60TPF
 ) -> None:

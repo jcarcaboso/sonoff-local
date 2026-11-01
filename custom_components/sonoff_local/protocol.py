@@ -143,6 +143,29 @@ class SonoffDeviceError(SonoffError):
         self.code = code
 
 
+# When each device may next be sent a request. This is module state, not client state,
+# because the limit belongs to the device: the config flow's probe and the coordinator
+# use separate clients, and a reload creates a new one.
+_next_request_at: dict[tuple[str, int], float] = {}
+_MAX_TRACKED_DEVICES: Final = 256
+
+
+def _reserve_request_slot(
+    device: tuple[str, int], interval: float, now: float
+) -> float:
+    """Claim the next free slot for a device and return the seconds to wait for it.
+
+    Claiming and updating happen with no ``await`` between them, so clients racing for
+    the same device each get their own slot.
+    """
+    if len(_next_request_at) >= _MAX_TRACKED_DEVICES:
+        for key in [k for k, when in _next_request_at.items() if when <= now]:
+            del _next_request_at[key]
+    slot = max(now, _next_request_at.get(device, 0.0))
+    _next_request_at[device] = slot + interval
+    return slot - now
+
+
 def _aes_key(devicekey: str) -> bytes:
     """Derive the AES key. MD5 is mandated by the device protocol."""
     return hashlib.md5(devicekey.encode(), usedforsecurity=False).digest()
@@ -383,7 +406,6 @@ class SonoffClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._observer = observer
         self._lock = asyncio.Lock()
-        self._not_before = 0.0
         self._sequence = 0
         self._poll_command: str | None = None
 
@@ -439,9 +461,11 @@ class SonoffClient:
         """Send a request, keeping requests spaced and retrying connection resets."""
         url = f"http://{self.host}:{self.port}/zeroconf/{command}"
         loop = asyncio.get_running_loop()
+        device = (self.host, self.port)
         async with self._lock:
             for attempt in range(1, MAX_ATTEMPTS + 1):
-                if (delay := self._not_before - loop.time()) > 0:
+                delay = _reserve_request_slot(device, self._min_interval, loop.time())
+                if delay > 0:
                     await asyncio.sleep(delay)
                 try:
                     return await self._post(url, body)
@@ -456,7 +480,11 @@ class SonoffClient:
                         raise SonoffConnectionError(str(err)) from err
                     _LOGGER.debug("Device busy on %s, attempt %s", command, attempt)
                 finally:
-                    self._not_before = loop.time() + self._min_interval
+                    # Spacing also counts from the end of a slow reply.
+                    _next_request_at[device] = max(
+                        _next_request_at.get(device, 0.0),
+                        loop.time() + self._min_interval,
+                    )
         raise AssertionError("unreachable")  # pragma: no cover
 
     async def request(
