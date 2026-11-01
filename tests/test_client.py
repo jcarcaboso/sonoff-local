@@ -20,6 +20,7 @@ from custom_components.sonoff_local.protocol import (
     SonoffDecryptError,
     SonoffDeviceError,
     SonoffEncryptionRequired,
+    SonoffKeyRejected,
     SonoffProtocolError,
 )
 
@@ -74,6 +75,14 @@ async def test_encrypted_envelope(
     assert isinstance(body["iv"], str)
     assert isinstance(body["data"], str)
     assert body["sequence"].isdecimal()
+    assert list(body) == [
+        "sequence",
+        "deviceid",
+        "selfApikey",
+        "data",
+        "encrypt",
+        "iv",
+    ]
 
 
 async def test_sequence_is_unique_and_increasing(
@@ -206,19 +215,46 @@ async def test_unreadable_reply_is_a_decrypt_error(
         await encrypted_client(session, device).request("getState")
 
 
-async def test_request_with_wrong_key_stays_a_device_error(
+async def test_wrong_key_is_reported_when_nothing_else_works(
     session: aiohttp.ClientSession, device: FakeS60TPF
 ) -> None:
-    """A rejected command must not be treated as proof of a wrong key.
-
-    Some devices reject getState outright (SonoffLAN #1442), so error 400 alone cannot
-    justify asking the user to re-enter a working key.
-    """
+    """A device that cannot read our requests points at the key."""
     device.devicekey = "a-different-key"
     client = encrypted_client(session, device)
-    with pytest.raises(SonoffDeviceError):
+    with pytest.raises(SonoffKeyRejected):
         await client.request("getState")
+    with pytest.raises(SonoffKeyRejected):
+        await client.async_read_state({"sledOnline": "on"})
+
+
+async def test_one_rejected_command_is_not_proof_of_a_wrong_key(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """If another command works, the key is fine."""
+    device.key_rejected_commands.add("getState")
+    state = await encrypted_client(session, device).async_read_state(
+        {"sledOnline": "on"}
+    )
+    assert state["power"] == 724
+
+
+async def test_empty_http_404_counts_as_alive(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """T6 answers getState with an empty 404 (SonoffLAN #1907): alive, not offline."""
+    device.http_404_commands.add("getState")
+    client = encrypted_client(session, device)
     assert await client.async_read_state({}) == {}
+    state = await client.async_read_state({"sledOnline": "on"})
+    assert state["voltage"] == 23717
+
+
+async def test_html_reply_counts_as_alive(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """Older firmware answers getState with HTML (SonoffLAN #1442)."""
+    device.garbage_replies = True
+    assert await encrypted_client(session, device).async_read_state({}) == {}
 
 
 @pytest.mark.parametrize("code", [404, 422, 400, 503])
@@ -423,6 +459,40 @@ async def test_plain_read_uses_documented_info(
     state = await plain_client(session, diy_device).async_read_state({})
     assert diy_device.commands()[0] == "info"
     assert state["fwVersion"] == "3.5.0"
+
+
+async def test_plain_device_settles_on_one_poll_command(
+    session: aiohttp.ClientSession, diy_device: FakeS60TPF
+) -> None:
+    """A DIY device must not get two requests on every poll."""
+    client = plain_client(session, diy_device)
+    await client.async_read_state({})
+    assert client.poll_command == "info"
+    diy_device.requests.clear()
+    await client.async_read_state({})
+    assert diy_device.commands() == ["info"]
+
+
+async def test_encrypted_device_keeps_looking_until_led_is_known(
+    session: aiohttp.ClientSession, device: FakeS60TPF
+) -> None:
+    """Readings must not be given up on just because the LED state is not known yet.
+
+    The S60TPF case: getState gives relay state only, and sledOnline arrives later by
+    TXT. Settling on getState early would lose the metrics permanently.
+    """
+    device.stateless_commands.add("sledOnline")
+    device.state = {"switches": [{"outlet": 0, "switch": "on"}]}
+    client = encrypted_client(session, device)
+    await client.async_read_state({})
+    assert client.poll_command is None
+
+    device.stateless_commands.clear()
+    device.stateless_commands.add("getState")
+    device.state = {"power": 724, "sledOnline": "on"}
+    state = await client.async_read_state({"sledOnline": "on"})
+    assert state["power"] == 724
+    assert client.poll_command == "sledOnline"
 
 
 async def test_unreachable_read_raises(

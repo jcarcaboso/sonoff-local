@@ -304,6 +304,35 @@ def test_redact_removes_secrets_at_any_depth() -> None:
     assert redacted["iv"] == f"<{len(secret)} chars>"
 
 
+@pytest.mark.parametrize(
+    "key", ["apPassword", "wifiPass", "authToken", "clientSecret", "ap_key", "wlanMac"]
+)
+def test_redact_covers_keys_firmware_might_add(key: str) -> None:
+    """An unknown secret must fail safe rather than reach a public bug report."""
+    assert redact({key: "hunter2"}) == {key: "**REDACTED**"}
+
+
+def test_redact_keeps_every_reading() -> None:
+    """Broad matching must not hide what capture exists to collect."""
+    readings = {
+        "power": 724,
+        "current": 5,
+        "voltage": 23717,
+        "dayKwh": 2,
+        "weekKwh": 2,
+        "monthKwh": 117,
+        "yearKwh": 117,
+        "rssi": -42,
+        "sledOnline": "on",
+        "fwVersion": "1.2.0",
+        "operSide": 1,
+        "uiActive": 60,
+        "timeZone": 2,
+        "switches": [{"outlet": 0, "switch": "on"}],
+    }
+    assert redact(readings) == readings
+
+
 def test_redact_keeps_structured_data() -> None:
     """A decoded ``data`` object is kept, only opaque strings are hidden."""
     assert redact({"data": {"power": 1}}) == {"data": {"power": 1}}

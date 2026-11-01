@@ -100,6 +100,11 @@ class FakeS60TPF:
         self.stateless_commands: set[str] = set()
         self.empty_replies = False
         self.garbage_replies = False
+        # Commands refused as if unreadable, and whether every command is.
+        self.key_rejected_commands: set[str] = set()
+        self.rejects_everything = False
+        # Commands answered with an empty HTTP 404, as T6 does for getState (#1907).
+        self.http_404_commands: set[str] = set()
         # Encrypts replies with this key instead, to model a reply we cannot read.
         self.reply_key: str | None = None
         self._server: TestServer | None = None
@@ -185,8 +190,11 @@ class FakeS60TPF:
             await asyncio.sleep(self.delay)
         if self.garbage_replies:
             return web.Response(text="<html>nope</html>")
+        if command in self.http_404_commands:
+            return web.Response(status=404)
 
-        if self.devicekey and (undecryptable or not body.get("encrypt")):
+        refused = self.rejects_everything or command in self.key_rejected_commands
+        if self.devicekey and (undecryptable or refused or not body.get("encrypt")):
             self.seq += 1
             return web.json_response(
                 {

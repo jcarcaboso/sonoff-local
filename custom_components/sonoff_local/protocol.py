@@ -93,23 +93,12 @@ _TXT_DATA_KEYS: Final = ("data1", "data2", "data3", "data4")
 _INTEGER_STRING_RE: Final = re.compile(r"^-?\d+$")
 
 _REDACTED: Final = "**REDACTED**"
-_SECRET_KEYS: Final = frozenset(
-    {
-        "apikey",
-        "bindinfos",
-        "bssid",
-        "devicekey",
-        "host",
-        "ip",
-        "mac",
-        "password",
-        "selfapikey",
-        "ssid",
-        "stamac",
-    }
-)
+# Matched as substrings so that a key firmware adds later fails safe: hiding a reading
+# by accident is a far smaller problem than publishing a password.
+_SECRET_FRAGMENTS: Final = ("key", "pass", "secret", "token", "ssid", "mac", "bindinfo")
+_SECRET_KEYS: Final = frozenset({"host", "ip"})
 _DEVICE_ID_KEYS: Final = frozenset({"deviceid", "id"})
-_OPAQUE_KEYS: Final = frozenset({"iv", *_TXT_DATA_KEYS})
+_OPAQUE_KEYS: Final = frozenset({"data", "iv", *_TXT_DATA_KEYS})
 
 Observer = Callable[[str, dict[str, Any]], None]
 
@@ -128,6 +117,17 @@ class SonoffEncryptionRequired(SonoffError):
 
 class SonoffDecryptError(SonoffError):
     """A payload could not be decrypted, which usually means a wrong devicekey."""
+
+
+class SonoffKeyRejected(SonoffDecryptError):
+    """The device could not read an encrypted request, which suggests a wrong key.
+
+    An unsupported command does not look like this: real devices answer those with
+    HTML or an empty HTTP 404 (SonoffLAN #1442, #1907), which is a protocol error. Doc
+    error 400 means the body could not be parsed, and for a device reporting
+    ``encrypt: true`` that points at the key. It is still indirect evidence, so
+    ``async_read_state`` only reports it if nothing else worked.
+    """
 
 
 class SonoffProtocolError(SonoffError):
@@ -323,15 +323,17 @@ def redact(value: Any) -> Any:
     """Return a copy that is safe to log or attach to a bug report.
 
     Removes keys, Wi-Fi details and network addresses at any depth, masks device IDs
-    and replaces opaque ciphertext with its length. Readings and unknown keys are kept
-    on purpose: they are the point of capturing a payload.
+    and replaces opaque ciphertext with its length. Readings and other unknown keys
+    are kept on purpose: they are the point of capturing a payload.
     """
     if isinstance(value, Mapping):
         result: dict[str, Any] = {}
         for key, item in value.items():
             name = str(key)
             lowered = name.lower()
-            if lowered in _SECRET_KEYS:
+            if lowered in _SECRET_KEYS or any(
+                fragment in lowered for fragment in _SECRET_FRAGMENTS
+            ):
                 result[name] = _REDACTED
             elif lowered in _DEVICE_ID_KEYS and isinstance(item, str):
                 result[name] = mask_device_id(item)
@@ -416,8 +418,9 @@ class SonoffClient:
             "selfApikey": "123",  # Fixed placeholder, as used by SonoffLAN.
         }
         if self._devicekey is not None:
-            body["data"], body["iv"] = encrypt_params(params, self._devicekey)
-            body["encrypt"] = True
+            # Field order matches SonoffLAN, in case a device's parser cares.
+            ciphertext, iv = encrypt_params(params, self._devicekey)
+            body |= {"data": ciphertext, "encrypt": True, "iv": iv}
         else:
             body["data"] = dict(params)
         return encode_json(body)
@@ -465,7 +468,8 @@ class SonoffClient:
         try:
             reply = await self._exchange(command, self._build_body(params))
         except SonoffError as err:
-            self._observe("error", {"command": command, "error": repr(err)})
+            # The type only: aiohttp's messages contain the device's address.
+            self._observe("error", {"command": command, "error": type(err).__name__})
             raise
         if not isinstance(reply, dict):
             raise SonoffProtocolError(f"Reply to {command} is not an object")
@@ -482,6 +486,8 @@ class SonoffClient:
                 and self._devicekey is None
             ):
                 raise SonoffEncryptionRequired(f"Device returned error {code}")
+            if code == ERROR_BAD_REQUEST and reply.get("encrypt"):
+                raise SonoffKeyRejected("Device could not read the encrypted request")
             raise SonoffDeviceError(code)
 
         data = reply.get("data")
@@ -531,14 +537,15 @@ class SonoffClient:
 
         ``state`` is the last known state. A device error means the device is alive
         but rejected that command, so the next candidate is tried. The first command
-        to return readings is remembered. If every candidate ran and none returned
-        readings, the command that returned the most data is remembered instead, so a
-        device with no meter does not get an LED write on each poll.
+        to return readings is remembered. If none does, the command that returned the
+        most data is remembered once all options are exhausted, so a device with no
+        meter does not get an LED write or a useless extra request on each poll.
         """
         candidates = self._poll_candidates(state)
         merged: dict[str, Any] = {}
         best: tuple[int, str | None] = (0, None)
         failure: SonoffConnectionError | None = None
+        rejected: SonoffKeyRejected | None = None
         answered = False
 
         for command, params in candidates:
@@ -546,6 +553,9 @@ class SonoffClient:
                 response = await self.request(command, params)
             except SonoffConnectionError as err:
                 failure = err
+                continue
+            except SonoffKeyRejected as err:
+                rejected = err
                 continue
             except (SonoffDeviceError, SonoffProtocolError) as err:
                 _LOGGER.debug("%s rejected by %s: %s", command, self.deviceid, err)
@@ -562,12 +572,16 @@ class SonoffClient:
                 best = (len(response.params), command)
 
         if not answered:
+            if rejected is not None:
+                raise rejected
             if failure is not None:
                 raise failure
             raise SonoffConnectionError("No poll command available")
-        if best[1] is not None and any(
-            command == COMMAND_SLED_ONLINE for command, _ in candidates
-        ):
+        tried_led = any(command == COMMAND_SLED_ONLINE for command, _ in candidates)
+        # An encrypted device's LED state may still arrive by TXT, so keep looking. A
+        # plain device that does not report one will never be able to use the echo.
+        no_led_expected = self._devicekey is None and COMMAND_SLED_ONLINE not in merged
+        if best[1] is not None and (tried_led or no_led_expected):
             self._poll_command = best[1]
         return merged
 
