@@ -1,0 +1,32 @@
+[project]
+name = "sonoff-local"
+version = "0.1.0"
+description = "Home Assistant custom integration for Sonoff devices over the LAN"
+readme = "README.md"
+requires-python = ">=3.14.2"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    # Pinned so CI is reproducible; this also pins homeassistant==2026.10.4.
+    "pytest-homeassistant-custom-component==0.13.375",
+    "ruff>=0.14",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["ASYNC", "B", "E", "F", "G", "I", "LOG", "PT", "RUF", "SIM", "T20", "UP", "W"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["custom_components.sonoff_local"]
