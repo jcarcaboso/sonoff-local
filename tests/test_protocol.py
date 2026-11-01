@@ -293,14 +293,14 @@ def test_redact_removes_secrets_at_any_depth() -> None:
         "data": secret,
         "data1": secret,
         "voltage": 23717,
-        "someNewKey": {"x": 1},
+        "someNewField": {"x": 1},
     }
     redacted = redact(payload)
     assert secret not in json.dumps(redacted)
     assert DEVICE_ID not in json.dumps(redacted)
     assert redacted["voltage"] == 23717
     assert redacted["nested"][0]["power"] == 724
-    assert redacted["someNewKey"] == {"x": 1}
+    assert redacted["someNewField"] == {"x": 1}
     assert redacted["iv"] == f"<{len(secret)} chars>"
 
 
